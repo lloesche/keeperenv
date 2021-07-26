@@ -13,6 +13,8 @@ zlib_download_url="https://zlib.net/zlib-${ZLIB_VERSION}.tar.xz"
 openssl_download_url="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
 python_download_url="https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz"
 arangodb_download_url="https://download.arangodb.com/Source/ArangoDB-${ARANGODB_VERSION}.tar.bz2"
+arangodb_download_url_macos="https://download.arangodb.com/arangodb37/Community/MacOSX/arangodb3-macos-${ARANGODB_VERSION}.tar.gz"
+arangodb_download_url_linux="https://download.arangodb.com/arangodb37/Community/Linux/arangodb3-linux-${ARANGODB_VERSION}.tar.gz"
 sysname=$(uname -s)
 archname=$(uname -m)
 
@@ -104,7 +106,7 @@ build_openssl_platform() {
         no-rc4 \
         no-ssl3 \
         no-comp \
-        -Wa,--noexecstack -O2 -DFORTIFY_SOURCE=2
+        -O2 -DFORTIFY_SOURCE=2
     make depend
     make
     if [ $make_install = true ]; then
@@ -156,6 +158,7 @@ make_arangodb() {
     local dl_to="$download_dir/arangodb.tar.bz2"
     local build_in="$build_dir/arangodb"
     local cmake_args=()
+    local build_prefix=()
 
     log "Building ArangoDB"
     mkdir -p "$build_in"
@@ -166,14 +169,44 @@ make_arangodb() {
     case "$sysname" in
     Darwin)
         cmake_args=(-DCMAKE_OSX_DEPLOYMENT_TARGET=10.11)
+        if [ "$archname" = "arm64" ]; then
+            build_prefix=(arch -x86_64)
+        fi
         ;;
     esac
 
     mkdir build
     cd build
-    cmake .. \
-        -DOPENSSL_ROOT_DIR=$install_dir \
+    "${build_prefix[@]}" cmake .. \
+        -DOPENSSL_ROOT_DIR="$install_dir" \
+        -DCMAKE_INSTALL_PREFIX="$install_dir" \
         "${cmake_args[@]}"
+    "${build_prefix[@]}" make
+}
+
+install_arangodb() {
+    local dl_to="$download_dir/arangodb.tar.gz"
+    local build_in="$build_dir/arangodb"
+    local download_url
+
+    log "Installing ArangoDB"
+    mkdir -p "$build_in"
+    case "$sysname" in
+    Darwin)
+        download_url="$arangodb_download_url_macos"
+        ;;
+    Linux)
+        download_url="$arangodb_download_url_linux"
+        ;;
+    esac
+
+
+    debug "Downloading $download_url to $dl_to"
+    curl -L -C - -o "$dl_to" "$download_url"
+    tar xzvf "$dl_to" --strip-components=1 -C "$build_in"
+    cd "$build_in"
+    rm -f README
+    cp -a * "$install_dir"
 }
 
 cleanup() {
