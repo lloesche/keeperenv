@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 set -e
 set -x
+num_cc=32
 ZLIB_VERSION="1.2.11"
 OPENSSL_VERSION="1.1.1k"
 PYTHON_VERSION="3.9.6"
 ARANGODB_VERSION="3.7.13"
+BZIP2_VERSION="1.0.8"
+SQLITE_VERSION="3360000"
 prefix_dir="$HOME/builder"
 build_dir="$prefix_dir/src"
 install_dir="$prefix_dir/dist"
@@ -13,6 +16,9 @@ zlib_download_url="https://zlib.net/zlib-${ZLIB_VERSION}.tar.xz"
 openssl_download_url="https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz"
 python_download_url="https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz"
 arangodb_download_url="https://download.arangodb.com/Source/ArangoDB-${ARANGODB_VERSION}.tar.bz2"
+bzip2_git_repo="git://sourceware.org/git/bzip2.git"
+sqlite_download_url="https://www.sqlite.org/2021/sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
+arangodb_zip_download_url="https://github.com/arangodb/arangodb/archive/refs/heads/devel.zip"
 arangodb_download_url_macos="https://download.arangodb.com/arangodb37/Community/MacOSX/arangodb3-macos-${ARANGODB_VERSION}.tar.gz"
 arangodb_download_url_linux="https://download.arangodb.com/arangodb37/Community/Linux/arangodb3-linux-${ARANGODB_VERSION}.tar.gz"
 sysname=$(uname -s)
@@ -42,10 +48,38 @@ main() {
     cd "$prefix_dir"
 
     make_zlib
+    make_bzip2
     make_openssl
+    make_sqlite
     make_python
     make_arangodb
     cleanup
+}
+
+make sqlite() {
+    local dl_to="$download_dir/sqlite.tar.gz"
+    local build_in="$build_dir/sqlite"
+
+    log "Building sqlite"
+    mkdir -p "$build_in"
+    debug "Downloading $sqlite_download_url to $dl_to"
+    curl -L -C - -o "$dl_to" "$sqlite_download_url"
+    tar xzvf "$dl_to" --strip-components=1 -C "$build_in"
+    cd "$build_in"
+    
+    ./configure \
+        --prefix="$install_dir"
+    make -j $num_cc
+}
+
+make bzip2() {
+    local repo="$build_dir/bzip2"
+
+    log "Building bzip2"
+    cd "$build_dir"
+    git clone "$bzip2_git_repo"
+    git checkout "bzip2-$BZIP2_VERSION"
+    make install PREFIX="$install_dir"
 }
 
 
@@ -62,6 +96,7 @@ make_zlib() {
 
     ./configure \
         --prefix="$install_dir"
+    make -j $num_cc
     make test
     make install
 }
@@ -108,7 +143,7 @@ build_openssl_platform() {
         no-comp \
         -O2 -DFORTIFY_SOURCE=2
     make depend
-    make
+    make -j $num_cc
     if [ $make_install = true ]; then
         make install
     fi
@@ -150,21 +185,24 @@ make_python() {
         --enable-optimizations \
         --with-openssl="$install_dir" \
         "${configure_args[@]}"
-    make
+    make -j $num_cc
     make install
 }
 
 make_arangodb() {
-    local dl_to="$download_dir/arangodb.tar.bz2"
-    local build_in="$build_dir/arangodb"
+    local dl_to="$download_dir/arangodb.zip"
+    local build_in="$build_dir/arangodb-devel"
     local cmake_args=()
     local build_prefix=()
 
     log "Building ArangoDB"
     mkdir -p "$build_in"
+    arangodb_download_url=$arangodb_zip_download_url
     debug "Downloading $arangodb_download_url to $dl_to"
-    curl -L -C - -o "$dl_to" "$arangodb_download_url"
-    tar xjvf "$dl_to" --strip-components=1 -C "$build_in"
+#    curl -L -C - -o "$dl_to" "$arangodb_download_url"
+#    tar xjvf "$dl_to" --strip-components=1 -C "$build_in"
+    cd "$build_dir"
+    unzip "$dl_to"
     cd "$build_in"
     case "$sysname" in
     Darwin)
@@ -181,7 +219,7 @@ make_arangodb() {
         -DOPENSSL_ROOT_DIR="$install_dir" \
         -DCMAKE_INSTALL_PREFIX="$install_dir" \
         "${cmake_args[@]}"
-    "${build_prefix[@]}" make
+    "${build_prefix[@]}" make -j $num_cc
 }
 
 install_arangodb() {
